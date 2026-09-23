@@ -6,16 +6,6 @@
 static volatile sig_atomic_t worker1_ready = 0;
 static volatile sig_atomic_t worker2_ready = 0;
 
-static void print_usage(FILE *stream, const char *prog_name) {
-    fprintf(stream, "Usage: %s <total_items>\n", prog_name);
-    fprintf(stream, "       %s -h | --help\n\n", prog_name);
-    fprintf(stream, "Arguments:\n");
-    fprintf(stream, "  <total_items>  Positive integer specifying total items to process\n\n");
-    fprintf(stream, "Options:\n");
-    fprintf(stream, "  -h, --help     Display this help message and exit\n");
-}
-
-
 /* Unified signal handler for both worker readiness signals */
 static void handle_worker_ready(int sig) {
     if (sig == SIGUSR1) {
@@ -40,16 +30,19 @@ static void setup_supervisor_signals(void) {
 }
 
 /* Logic executed by Worker 1 process */
-static void run_worker1(void) {
+static void run_worker1(int read_fd) {
     printf("  [Worker 1] Started. PID: %d, PPID: %d\n", getpid(), getppid());
-    printf("  [Worker 1] Initializing station...\n");
-    sleep(2);
+    printf("  [Worker 1] Pipe read descriptor assigned: fd=%d\n", read_fd);
+    sleep(1);
 
     printf("  [Worker 1] Sending SIGUSR1 readiness signal to Supervisor...\n");
     if (kill(getppid(), SIGUSR1) == -1) {
         perror("  [Worker 1] Failed to send SIGUSR1");
+        close(read_fd);
         _exit(EXIT_FAILURE);
     }
+
+    close(read_fd);
     _exit(EXIT_SUCCESS);
 }
 
@@ -57,7 +50,7 @@ static void run_worker1(void) {
 static void run_worker2(void) {
     printf("  [Worker 2] Started. PID: %d, PPID: %d\n", getpid(), getppid());
     printf("  [Worker 2] Initializing testing station...\n");
-    sleep(2);
+    sleep(1);
 
     printf("  [Worker 2] Sending SIGUSR2 readiness signal to Supervisor...\n");
     if (kill(getppid(), SIGUSR2) == -1) {
@@ -66,7 +59,16 @@ static void run_worker2(void) {
     }
     _exit(EXIT_SUCCESS);
 }
- 
+
+static void print_usage(FILE *stream, const char *prog_name) {
+    fprintf(stream, "Usage: %s <total_items>\n", prog_name);
+    fprintf(stream, "       %s -h | --help\n\n", prog_name);
+    fprintf(stream, "Arguments:\n");
+    fprintf(stream, "  <total_items>  Positive integer specifying total items to process\n\n");
+    fprintf(stream, "Options:\n");
+    fprintf(stream, "  -h, --help     Display this help message and exit\n");
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "[ERROR] Missing required argument.\n\n");
@@ -97,7 +99,15 @@ int main(int argc, char *argv[]) {
 
     setup_supervisor_signals();
 
-    /* Block signals temporarily to prevent race conditions during child startup */
+    // Create the unnamed pipe before fork()
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        perror("[ERROR] Failed to create unnamed pipe");
+        return EXIT_FAILURE;
+    }
+    printf("[Supervisor] Unnamed pipe created successfully (read_fd=%d, write_fd=%d).\n", pipe_fd[0], pipe_fd[1]);
+
+    /* Block signals to prevent race conditions during worker bootstrap */
     sigset_t block_mask, orig_mask;
     sigemptyset(&block_mask);
     sigaddset(&block_mask, SIGUSR1);
@@ -115,8 +125,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (pid1 == 0) {
-        sigprocmask(SIG_SETMASK, &orig_mask, NULL); // Restore original mask in child
-        run_worker1();
+        sigprocmask(SIG_SETMASK, &orig_mask, NULL);
+        close(pipe_fd[1]); 
+        run_worker1(pipe_fd[0]);
     }
     
     // Fork Worker 2
@@ -127,19 +138,29 @@ int main(int argc, char *argv[]) {
     }
 
     if (pid2 == 0) {
-        sigprocmask(SIG_SETMASK, &orig_mask, NULL); // Restore original mask in child
+        sigprocmask(SIG_SETMASK, &orig_mask, NULL);
+        // Worker 2 does not use this pipe; close both ends
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
         run_worker2();
     }
 
-    // Safe waiting loop using sigsuspend (atomic unblock and wait)
+    // Supervisor closes read end
+    close(pipe_fd[0]);
+
+    // Await ready signals
     printf("[Supervisor] Awaiting readiness signals from both workers...\n");
     while (!worker1_ready || !worker2_ready) {
         sigsuspend(&orig_mask);
     }
-    sigprocmask(SIG_SETMASK, &orig_mask, NULL); // Restore mask after signals are received
+    sigprocmask(SIG_SETMASK, &orig_mask, NULL);
+
     printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
 
-    // Wait for children to finish
+    // Close write end in supervisor for now
+    close(pipe_fd[1]);
+
+    // Wait for children
     int status;
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
