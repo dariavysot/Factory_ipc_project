@@ -1,0 +1,11 @@
+factory
+*.exe
+
+*.o
+*.out
+
+*.fifo
+/tmp/factory_*
+
+*.log
+!break_log.txt
