@@ -2,7 +2,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 
-/* Atomic readiness flag for both workers */
+/* Atomic readiness flags for both workers */
 static volatile sig_atomic_t worker1_ready = 0;
 static volatile sig_atomic_t worker2_ready = 0;
 
@@ -29,7 +29,7 @@ static void setup_supervisor_signals(void) {
     }
 }
 
-/* Logic executed by Worker 1 process */
+/* Worker 1 logic: takes the read descriptor */
 static void run_worker1(int read_fd) {
     printf("  [Worker 1] Started. PID: %d, PPID: %d\n", getpid(), getppid());
     printf("  [Worker 1] Pipe read descriptor assigned: fd=%d\n", read_fd);
@@ -42,11 +42,13 @@ static void run_worker1(int read_fd) {
         _exit(EXIT_FAILURE);
     }
 
+    // Temporary wait to observe Supervisor streaming items
+    sleep(2);
     close(read_fd);
     _exit(EXIT_SUCCESS);
 }
 
-/* Logic executed by Worker 2 process */
+/* Worker 2 logic */
 static void run_worker2(void) {
     printf("  [Worker 2] Started. PID: %d, PPID: %d\n", getpid(), getppid());
     printf("  [Worker 2] Initializing testing station...\n");
@@ -99,7 +101,7 @@ int main(int argc, char *argv[]) {
 
     setup_supervisor_signals();
 
-    // Create the unnamed pipe before fork()
+    // 1. Create unnamed pipe before fork()
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("[ERROR] Failed to create unnamed pipe");
@@ -136,7 +138,7 @@ int main(int argc, char *argv[]) {
         perror("[ERROR] Failed to fork Worker 2");
         return EXIT_FAILURE;
     }
-
+    
     if (pid2 == 0) {
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
         // Worker 2 does not use this pipe; close both ends
@@ -157,8 +159,28 @@ int main(int argc, char *argv[]) {
 
     printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
 
-    // Close write end in supervisor for now
+    // Seed random generator for serial numbers
+    srand((unsigned int)time(NULL));
+
+    // Stream serial numbers into the pipe
+    printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
+    for (long i = 0; i < total_items; i++) {
+        pipe_packet_t packet;
+        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
+
+        ssize_t bytes_written = write(pipe_fd[1], &packet, sizeof(packet));
+        if (bytes_written != sizeof(packet)) {
+            perror("[ERROR] Failed to write item packet into pipe");
+            break;
+        }
+
+        printf("  [Supervisor] Dispatched item [%ld/%ld]: serial #%d\n",
+               i + 1, total_items, packet.serial_number);
+    }
+
+    // Close write end to signal EOF to reader
     close(pipe_fd[1]);
+    printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
 
     // Wait for children
     int status;
