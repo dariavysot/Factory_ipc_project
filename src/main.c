@@ -31,6 +31,7 @@ static void setup_supervisor_signals(void) {
 
 /* Worker 1 logic: takes the read descriptor */
 static void run_worker1(int read_fd) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("  [Worker 1] Started. PID: %d, PPID: %d\n", getpid(), getppid());
     printf("  [Worker 1] Pipe read descriptor assigned: fd=%d\n", read_fd);
     sleep(1);
@@ -62,16 +63,17 @@ static void run_worker1(int read_fd) {
     if (bytes_read == -1) {
         perror("  [Worker 1] Error reading from pipe");
         close(read_fd);
-        _exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE);
     }
 
     printf("  [Worker 1] Reached EOF on pipe. Total items received: %ld. Closing station.\n", processed_count);
     close(read_fd);
-    _exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }
 
 /* Worker 2 logic */
 static void run_worker2(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("  [Worker 2] Started. PID: %d, PPID: %d\n", getpid(), getppid());
     printf("  [Worker 2] Initializing testing station...\n");
     sleep(1);
@@ -79,9 +81,9 @@ static void run_worker2(void) {
     printf("  [Worker 2] Sending SIGUSR2 readiness signal to Supervisor...\n");
     if (kill(getppid(), SIGUSR2) == -1) {
         perror("  [Worker 2] Failed to send SIGUSR2");
-        _exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE);
     }
-    _exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }
 
 static void print_usage(FILE *stream, const char *prog_name) {
