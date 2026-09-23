@@ -1,6 +1,7 @@
 #include "common.h"
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 /* Atomic readiness flags for both workers */
 static volatile sig_atomic_t worker1_ready = 0;
@@ -40,7 +41,7 @@ static void run_worker1(int read_fd) {
     if (kill(getppid(), SIGUSR1) == -1) {
         perror("  [Worker 1] Failed to send SIGUSR1");
         close(read_fd);
-        _exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE);
     }
 
     pipe_packet_t packet;
@@ -125,10 +126,19 @@ int main(int argc, char *argv[]) {
 
     setup_supervisor_signals();
 
-    // 1. Create unnamed pipe before fork()
+    //Setup named pipe (FIFO) for communication between workers
+    unlink(FIFO_PATH); // Clean up stale FIFO if exists
+    if (mkfifo(FIFO_PATH, 0666) == -1) {
+        perror("[ERROR] Failed to create FIFO");
+        return EXIT_FAILURE;
+    }
+    printf("[Supervisor] Named pipe (FIFO) created at: %s\n", FIFO_PATH);
+
+    //Create unnamed pipe before fork()
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("[ERROR] Failed to create unnamed pipe");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
     printf("[Supervisor] Unnamed pipe created successfully (read_fd=%d, write_fd=%d).\n", pipe_fd[0], pipe_fd[1]);
@@ -147,6 +157,7 @@ int main(int argc, char *argv[]) {
     pid_t pid1 = fork();
     if (pid1 == -1) {
         perror("[ERROR] Failed to fork Worker 1");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
 
@@ -155,11 +166,12 @@ int main(int argc, char *argv[]) {
         close(pipe_fd[1]); 
         run_worker1(pipe_fd[0]);
     }
-    
+
     // Fork Worker 2
     pid_t pid2 = fork();
     if (pid2 == -1) {
         perror("[ERROR] Failed to fork Worker 2");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
     
@@ -211,6 +223,9 @@ int main(int argc, char *argv[]) {
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
 
-    printf("[Supervisor] All workers shut down cleanly. Exiting.\n");
+    // Clean up FIFO node from filesystem
+    unlink(FIFO_PATH);
+    printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
+
     return EXIT_SUCCESS;
 }
