@@ -23,13 +23,43 @@ void run_worker2(void) {
         exit(EXIT_FAILURE);
     }
 
-    // Temporary wait loop until Worker 1 sends EOF
-    char dummy_buf[128];
-    while (read(fifo_read_fd, dummy_buf, sizeof(dummy_buf)) > 0) {
-        // Discard until Step 2-3 implementation
+    fifo_packet_t packet;
+    ssize_t bytes_read;
+    long total_received = 0;
+    long standard_count = 0;
+    long defect_count = 0;
+
+    // Read inspected products from FIFO until Worker 1 closes write end (EOF)
+    while ((bytes_read = read(fifo_read_fd, &packet, sizeof(packet))) > 0) {
+        if (bytes_read != sizeof(packet)) {
+            fprintf(stderr, "  [Worker 2] Warning: incomplete FIFO packet read.\n");
+            continue;
+        }
+
+        total_received++;
+
+        if (strcmp(packet.status, STATUS_STANDARD) == 0) {
+            standard_count++;
+            printf("      [Worker 2] Received item #%ld (serial #%d) -> Status: [%s] (Accepted for final testing)\n",
+                   total_received, packet.serial_number, packet.status);
+        } else {
+            defect_count++;
+            printf("      [Worker 2] Received item #%ld (serial #%d) -> Status: [%s] (Discarded to scrap)\n",
+                   total_received, packet.serial_number, packet.status);
+        }
+
+        sleep(5);
     }
 
-    printf("  [Worker 2] FIFO reached EOF. Closing reader station.\n");
+    if (bytes_read == -1) {
+        perror("  [Worker 2] Error reading from FIFO");
+        close(fifo_read_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("  [Worker 2] FIFO reached EOF. Summary: %ld received (%ld standard accepted, %ld defects scrapped).\n",
+           total_received, standard_count, defect_count);
+
     close(fifo_read_fd);
     exit(EXIT_SUCCESS);
 }
