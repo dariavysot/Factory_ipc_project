@@ -91,12 +91,31 @@ int main(int argc, char *argv[]) {
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
-    printf("[Supervisor] Message queue initialized (msqid=%d, key=0x%x).\n", msqid, msg_key);
 
-    //Create unnamed pipe before fork()
+    /* Drain any stale messages leftover from previously killed runs */
+    mq_packet_t stale_drain;
+    while (msgrcv(msqid, &stale_drain, sizeof(stale_drain) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+        /* Purge leftover queue messages */
+    }
+    printf("[Supervisor] Message queue initialized and purged (msqid=%d, key=0x%x).\n", msqid, msg_key);
+
+    // Setup POSIX named semaphore for mutual exclusion during worker breaks
+    sem_unlink(SEM_NAME); // Clean up stale semaphore if leftover
+    sem_t *break_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 1);
+    if (break_sem == SEM_FAILED) {
+        perror("[ERROR] Failed to create break semaphore");
+        msgctl(msqid, IPC_RMID, NULL);
+        unlink(FIFO_PATH);
+        return EXIT_FAILURE;
+    }
+    printf("[Supervisor] Break synchronization semaphore initialized: %s (value=1).\n", SEM_NAME);
+
+    // Create unnamed pipe before fork()
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("[ERROR] Failed to create unnamed pipe");
+        sem_close(break_sem);
+        sem_unlink(SEM_NAME);
         msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
@@ -117,6 +136,8 @@ int main(int argc, char *argv[]) {
     pid_t pid1 = fork();
     if (pid1 == -1) {
         perror("[ERROR] Failed to fork Worker 1");
+        sem_close(break_sem);
+        sem_unlink(SEM_NAME);
         msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
@@ -132,6 +153,8 @@ int main(int argc, char *argv[]) {
     pid_t pid2 = fork();
     if (pid2 == -1) {
         perror("[ERROR] Failed to fork Worker 2");
+        sem_close(break_sem);
+        sem_unlink(SEM_NAME);
         msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
@@ -160,7 +183,7 @@ int main(int argc, char *argv[]) {
     // Seed random generator for serial numbers
     srand((unsigned int)time(NULL));
 
-    // Stream serial numbers into the pipe
+    // Stream serial numbers into unnamed pipe
     printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
     for (long i = 0; i < total_items; i++) {
         pipe_packet_t packet;
@@ -176,11 +199,11 @@ int main(int argc, char *argv[]) {
                i + 1, total_items, packet.serial_number);
     }
 
-    // Close write end to signal EOF to reader
+    // Close pipe to signal EOF to Worker 1
     close(pipe_fd[1]);
     printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
 
-    // Wait for children
+    // Wait for worker termination
     int status;
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
@@ -211,7 +234,14 @@ int main(int argc, char *argv[]) {
     }
     printf("=============================================================\n\n");
 
-    // Clean up IPC resources
+    // Clean up all IPC resources
+    sem_close(break_sem);
+    if (sem_unlink(SEM_NAME) == -1) {
+        perror("[ERROR] Failed to unlink semaphore");
+    } else {
+        printf("[Supervisor] Break semaphore unlinked successfully.\n");
+    }
+
     if (msgctl(msqid, IPC_RMID, NULL) == -1) {
         perror("[ERROR] Failed to remove message queue");
     } else {
