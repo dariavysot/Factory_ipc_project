@@ -1,15 +1,14 @@
 #include "common.h"
 
-void take_break(const char *worker_name) {
+void take_break(const char *worker_name, const char *reason) {
     sem_t *sem = sem_open(SEM_NAME, 0);
     if (sem == SEM_FAILED) {
         perror("Failed to attach to break semaphore");
         return;
     }
 
-    printf("  %s requesting break... (waiting for semaphore)\n", worker_name);
+    printf("  %s requesting break [%s]... (waiting for semaphore)\n", worker_name, reason);
 
-    // Wait until break room is free (semaphore value becomes 1, then decrement to 0)
     if (sem_wait(sem) == -1) {
         perror("sem_wait failed");
         sem_close(sem);
@@ -26,14 +25,17 @@ void take_break(const char *worker_name) {
     timeinfo = localtime(&rawtime);
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
 
-    printf("  %s entered break room at %s (semaphore locked)\n", worker_name, time_str);
+    printf("  %s entered break room at %s (reason: %s, semaphore locked)\n",
+           worker_name, time_str, reason);
+
     if (log_fp) {
-        fprintf(log_fp, "[%s | PID %d] START break at %s\n", worker_name, getpid(), time_str);
+        fprintf(log_fp, "[%s | PID %d] START break at %s | Reason: %s\n",
+                worker_name, getpid(), time_str, reason);
         fflush(log_fp);
     }
 
     // Simulate break duration (1 second)
-    sleep(1);
+    sleep(4);
 
     time(&rawtime);
     timeinfo = localtime(&rawtime);
@@ -41,7 +43,8 @@ void take_break(const char *worker_name) {
 
     printf("  %s ended break at %s (semaphore released)\n", worker_name, time_str);
     if (log_fp) {
-        fprintf(log_fp, "[%s | PID %d] END   break at %s\n", worker_name, getpid(), time_str);
+        fprintf(log_fp, "[%s | PID %d] END   break at %s\n", 
+            worker_name, getpid(), time_str);
         fclose(log_fp);
     }
 

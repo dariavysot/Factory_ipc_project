@@ -34,20 +34,19 @@ void run_worker1(int read_fd) {
     long processed_count = 0;
     long defect_count = 0;
 
-    // Read streamed serial numbers from unnamed pipe
+    // Volume fatigue tracking: random batch threshold between 5 and 7
+    int items_since_break = 0;
+    int current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
+
     while ((bytes_read = read(read_fd, &in_packet, sizeof(in_packet))) > 0) {
-        if (processed_count == 2) {
-            take_break("[Worker 1]");
-        }
-        
         if (bytes_read != sizeof(in_packet)) {
             fprintf(stderr, "  [Worker 1] Warning: incomplete packet read from pipe.\n");
             continue;
         }
 
         processed_count++;
+        items_since_break++;
 
-        // Simulate 15% defect probability
         int roll = rand() % 100;
         int is_defect = (roll < DEFECT_PROBABILITY_PERCENT);
 
@@ -73,7 +72,17 @@ void run_worker1(int read_fd) {
             break;
         }
 
-        sleep(8); // 80ms simulation delay per inspection
+        // Check workload fatigue threshold
+        if (items_since_break >= current_threshold) {
+            char reason_buf[64];
+            snprintf(reason_buf, sizeof(reason_buf), "Batch quota reached: %d items", items_since_break);
+            take_break("[Worker 1]", reason_buf);
+
+            items_since_break = 0;
+            current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
+        }
+
+        sleep(8);
     }
 
     if (bytes_read == -1) {
