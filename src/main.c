@@ -77,10 +77,27 @@ int main(int argc, char *argv[]) {
     }
     printf("[Supervisor] Named pipe (FIFO) created at: %s\n", FIFO_PATH);
 
+    // Setup System V Message Queue
+    key_t msg_key = ftok(".", PROJECT_ID);
+    if (msg_key == -1) {
+        perror("[ERROR] Failed to generate message queue key via ftok");
+        unlink(FIFO_PATH);
+        return EXIT_FAILURE;
+    }
+
+    int msqid = msgget(msg_key, IPC_CREAT | 0666);
+    if (msqid == -1) {
+        perror("[ERROR] Failed to create message queue");
+        unlink(FIFO_PATH);
+        return EXIT_FAILURE;
+    }
+    printf("[Supervisor] Message queue initialized (msqid=%d, key=0x%x).\n", msqid, msg_key);
+
     //Create unnamed pipe before fork()
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("[ERROR] Failed to create unnamed pipe");
+        msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
@@ -100,13 +117,14 @@ int main(int argc, char *argv[]) {
     pid_t pid1 = fork();
     if (pid1 == -1) {
         perror("[ERROR] Failed to fork Worker 1");
+        msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
 
     if (pid1 == 0) {
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
-        close(pipe_fd[1]); 
+        close(pipe_fd[1]);
         run_worker1(pipe_fd[0]);
     }
 
@@ -114,6 +132,7 @@ int main(int argc, char *argv[]) {
     pid_t pid2 = fork();
     if (pid2 == -1) {
         perror("[ERROR] Failed to fork Worker 2");
+        msgctl(msqid, IPC_RMID, NULL);
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
@@ -123,7 +142,7 @@ int main(int argc, char *argv[]) {
         // Worker 2 does not use this pipe; close both ends
         close(pipe_fd[0]);
         close(pipe_fd[1]);
-        run_worker2();
+        run_worker2(msqid);
     }
 
     // Supervisor closes read end
@@ -165,6 +184,39 @@ int main(int argc, char *argv[]) {
     int status;
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
+
+    // Read and print final quality test results from Message Queue
+    printf("\n================ [SUPERVISOR QUALITY REPORT] ================\n");
+    mq_packet_t result_msg;
+    long passed_count = 0;
+    double total_score = 0.0;
+
+    while (msgrcv(msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+        passed_count++;
+        total_score += result_msg.quality_score;
+        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
+               passed_count, result_msg.serial_number, result_msg.quality_score);
+    }
+
+    if (errno != ENOMSG && errno != 0) {
+        perror("[ERROR] Error reading from message queue");
+    }
+
+    printf("-------------------------------------------------------------\n");
+    printf("  Total items dispatched: %ld\n", total_items);
+    printf("  Items passed to final test: %ld\n", passed_count);
+    printf("  Items rejected as defect: %ld\n", total_items - passed_count);
+    if (passed_count > 0) {
+        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
+    }
+    printf("=============================================================\n\n");
+
+    // Clean up IPC resources
+    if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+        perror("[ERROR] Failed to remove message queue");
+    } else {
+        printf("[Supervisor] Message queue deallocated successfully.\n");
+    }
 
     unlink(FIFO_PATH);
     printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
