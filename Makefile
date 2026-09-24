@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2 -Iinclude
 LDFLAGS = -lpthread
 
-SRCS = src/main.c src/worker1.c src/worker2.c
+SRCS = src/main.c src/worker1.c src/worker2.c src/break_manager.c
 OBJS = $(SRCS:.c=.o)
 TARGET = factory
 
@@ -17,4 +17,4 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/*.o $(TARGET) /tmp/factory_fifo
+	rm -f src/*.o $(TARGET) /tmp/factory_fifo break_log.txt

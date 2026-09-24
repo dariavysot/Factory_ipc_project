@@ -59,5 +59,7 @@ typedef struct {
 /* Worker process entry points */
 void run_worker1(int read_fd);
 void run_worker2(int mtype);
+/* Worker break synchronization helper */
+void take_break(const char *worker_name);
 
 #endif // COMMON_H
