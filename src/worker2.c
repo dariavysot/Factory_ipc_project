@@ -33,6 +33,10 @@ void run_worker2(int msqid) {
 
     // Read inspected products from FIFO until Worker 1 closes write end (EOF)
     while ((bytes_read = read(fifo_read_fd, &packet, sizeof(packet))) > 0) {
+        if (total_received == 2) {
+            take_break("[Worker 2]");
+        }
+
         if (bytes_read != sizeof(packet)) {
             fprintf(stderr, "  [Worker 2] Warning: incomplete FIFO packet read.\n");
             continue;

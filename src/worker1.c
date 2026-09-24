@@ -36,6 +36,10 @@ void run_worker1(int read_fd) {
 
     // Read streamed serial numbers from unnamed pipe
     while ((bytes_read = read(read_fd, &in_packet, sizeof(in_packet))) > 0) {
+        if (processed_count == 2) {
+            take_break("[Worker 1]");
+        }
+        
         if (bytes_read != sizeof(in_packet)) {
             fprintf(stderr, "  [Worker 1] Warning: incomplete packet read from pipe.\n");
             continue;
