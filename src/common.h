@@ -29,6 +29,10 @@
 #define STATUS_STANDARD "STANDARD"
 #define STATUS_DEFECT   "DEFECT"
 
+/* Break trigger thresholds for workload volume */
+#define BREAK_BATCH_MIN 5
+#define BREAK_BATCH_MAX 7
+
 /* 
  * 1. Data structure for the unnamed pipe
  * Direction: Supervisor (Parent) -> Worker 1 (Child 1)
@@ -59,7 +63,8 @@ typedef struct {
 /* Worker process entry points */
 void run_worker1(int read_fd);
 void run_worker2(int mtype);
-/* Worker break synchronization helper */
-void take_break(const char *worker_name);
+
+/* Break management functions */
+void take_break(const char *worker_name, const char *reason);
 
 #endif // COMMON_H

@@ -31,18 +31,18 @@ void run_worker2(int msqid) {
     long standard_count = 0;
     long defect_count = 0;
 
-    // Read inspected products from FIFO until Worker 1 closes write end (EOF)
-    while ((bytes_read = read(fifo_read_fd, &packet, sizeof(packet))) > 0) {
-        if (total_received == 2) {
-            take_break("[Worker 2]");
-        }
+    // Volume fatigue tracking: random batch threshold between 5 and 7
+    int items_since_break = 0;
+    int current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
 
+    while ((bytes_read = read(fifo_read_fd, &packet, sizeof(packet))) > 0) {
         if (bytes_read != sizeof(packet)) {
             fprintf(stderr, "  [Worker 2] Warning: incomplete FIFO packet read.\n");
             continue;
         }
 
         total_received++;
+        items_since_break++;
 
         if (strcmp(packet.status, STATUS_STANDARD) == 0) {
             standard_count++;
@@ -70,6 +70,16 @@ void run_worker2(int msqid) {
             defect_count++;
             printf("      [Worker 2] Skipping item #%ld (serial #%d): Status [%s] -> Discarded, no score assigned\n",
                    total_received, packet.serial_number, packet.status);
+        }
+
+        // Check workload fatigue threshold
+        if (items_since_break >= current_threshold) {
+            char reason_buf[64];
+            snprintf(reason_buf, sizeof(reason_buf), "Batch quota reached: %d items", items_since_break);
+            take_break("[Worker 2]", reason_buf);
+
+            items_since_break = 0;
+            current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
         }
 
         sleep(5);
