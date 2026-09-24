@@ -99,13 +99,12 @@ int main(int argc, char *argv[]) {
     }
 
 
-    int msqid = msgget(msg_key, IPC_CREAT | 0666);
+int msqid = msgget(msg_key, IPC_CREAT | 0666);
     if (msqid == -1) {
         perror("[ERROR] Failed to create message queue");
         unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
-
 
     /* Drain any stale messages leftover from previously killed runs */
     mq_packet_t stale_drain;
@@ -113,7 +112,6 @@ int main(int argc, char *argv[]) {
         /* Purge leftover queue messages */
     }
     printf("[Supervisor] Message queue initialized and purged (msqid=%d, key=0x%x).\n", msqid, msg_key);
-
 
     // Setup POSIX named semaphore for mutual exclusion during worker breaks
     sem_unlink(SEM_NAME); // Clean up stale semaphore if leftover
