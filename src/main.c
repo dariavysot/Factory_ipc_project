@@ -30,97 +30,6 @@ static void setup_supervisor_signals(void) {
     }
 }
 
-/* Worker 1 logic: takes the read descriptor */
-static void run_worker1(int read_fd) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-    printf("  [Worker 1] Started. PID: %d, PPID: %d\n", getpid(), getppid());
-    printf("  [Worker 1] Pipe read descriptor assigned: fd=%d\n", read_fd);
-
-    // Open FIFO for writing to Worker 2
-    printf("  [Worker 1] Opening FIFO for writing...\n");
-    int fifo_write_fd = open(FIFO_PATH, O_WRONLY);
-    if (fifo_write_fd == -1) {
-        perror("  [Worker 1] Failed to open FIFO for writing");
-        close(read_fd);
-        exit(EXIT_FAILURE);
-    }
-    printf("  [Worker 1] FIFO channel opened for writing (fd=%d).\n", fifo_write_fd);
-
-    sleep(1);
-
-    printf("  [Worker 1] Sending SIGUSR1 readiness signal to Supervisor...\n");
-    if (kill(getppid(), SIGUSR1) == -1) {
-        perror("  [Worker 1] Failed to send SIGUSR1");
-        close(read_fd);
-        close(fifo_write_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    pipe_packet_t packet;
-    ssize_t bytes_read;
-    long processed_count = 0;
-
-    // Read streamed serial numbers until Supervisor closes the write end (EOF)
-    while ((bytes_read = read(read_fd, &packet, sizeof(packet))) > 0) {
-        if (bytes_read != sizeof(packet)) {
-            fprintf(stderr, "  [Worker 1] Warning: incomplete packet read.\n");
-            continue;
-        }
-
-        processed_count++;
-        printf("    [Worker 1] Processed item #%ld: serial #%d received from pipe\n",
-               processed_count, packet.serial_number);
-        sleep(2); // 2s processing simulation per item
-    }
-
-    if (bytes_read == -1) {
-        perror("  [Worker 1] Error reading from pipe");
-        close(read_fd);
-        close(fifo_write_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("  [Worker 1] Reached EOF on pipe. Total items received: %ld. Closing station.\n", processed_count);
-    close(read_fd);
-    close(fifo_write_fd); // Closing write end signals EOF to Worker 2
-    exit(EXIT_SUCCESS);
-}
-
-/* Worker 2 logic */
-static void run_worker2(void) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-    printf("  [Worker 2] Started. PID: %d, PPID: %d\n", getpid(), getppid());
-    printf("  [Worker 2] Opening FIFO for reading...\n");
-
-    // Open FIFO for reading from Worker 1
-    int fifo_read_fd = open(FIFO_PATH, O_RDONLY);
-    if (fifo_read_fd == -1) {
-        perror("  [Worker 2] Failed to open FIFO for reading");
-        exit(EXIT_FAILURE);
-    }
-    printf("  [Worker 2] FIFO channel opened for reading (fd=%d).\n", fifo_read_fd);
-
-    sleep(1);
-
-    printf("  [Worker 2] Sending SIGUSR2 readiness signal to Supervisor...\n");
-    if (kill(getppid(), SIGUSR2) == -1) {
-        perror("  [Worker 2] Failed to send SIGUSR2");
-        close(fifo_read_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    // Temporary wait while Worker 1 processes items
-    // (In Step 3 Worker 2 will loop read from this fd)
-    char dummy_buf[128];
-    while (read(fifo_read_fd, dummy_buf, sizeof(dummy_buf)) > 0) {
-        // Discard until EOF from Worker 1
-    }
-
-    printf("  [Worker 2] FIFO reached EOF. Closing reader station.\n");
-    close(fifo_read_fd);
-    exit(EXIT_SUCCESS);
-}
-
 static void print_usage(FILE *stream, const char *prog_name) {
     fprintf(stream, "Usage: %s <total_items>\n", prog_name);
     fprintf(stream, "       %s -h | --help\n\n", prog_name);
@@ -220,7 +129,7 @@ int main(int argc, char *argv[]) {
     // Supervisor closes read end
     close(pipe_fd[0]);
 
-    // Await ready signals
+    // Await readiness handshake
     printf("[Supervisor] Awaiting readiness signals from both workers...\n");
     while (!worker1_ready || !worker2_ready) {
         sigsuspend(&orig_mask);
@@ -257,7 +166,6 @@ int main(int argc, char *argv[]) {
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
 
-    // Clean up FIFO node from filesystem
     unlink(FIFO_PATH);
     printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
 
