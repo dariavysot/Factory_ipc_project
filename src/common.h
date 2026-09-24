@@ -58,6 +58,6 @@ typedef struct {
 
 /* Worker process entry points */
 void run_worker1(int read_fd);
-void run_worker2(void);
+void run_worker2(int mtype);
 
 #endif // COMMON_H
