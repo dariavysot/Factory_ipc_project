@@ -1,6 +1,7 @@
 #include "common.h"
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 /* Atomic readiness flags for both workers */
 static volatile sig_atomic_t worker1_ready = 0;
@@ -27,63 +28,6 @@ static void setup_supervisor_signals(void) {
         perror("[ERROR] Failed to configure worker signal handlers");
         exit(EXIT_FAILURE);
     }
-}
-
-/* Worker 1 logic: takes the read descriptor */
-static void run_worker1(int read_fd) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-    printf("  [Worker 1] Started. PID: %d, PPID: %d\n", getpid(), getppid());
-    printf("  [Worker 1] Pipe read descriptor assigned: fd=%d\n", read_fd);
-    sleep(1);
-
-    printf("  [Worker 1] Sending SIGUSR1 readiness signal to Supervisor...\n");
-    if (kill(getppid(), SIGUSR1) == -1) {
-        perror("  [Worker 1] Failed to send SIGUSR1");
-        close(read_fd);
-        _exit(EXIT_FAILURE);
-    }
-
-    pipe_packet_t packet;
-    ssize_t bytes_read;
-    long processed_count = 0;
-
-    // Read streamed serial numbers until Supervisor closes the write end (EOF)
-    while ((bytes_read = read(read_fd, &packet, sizeof(packet))) > 0) {
-        if (bytes_read != sizeof(packet)) {
-            fprintf(stderr, "  [Worker 1] Warning: incomplete packet read.\n");
-            continue;
-        }
-
-        processed_count++;
-        printf("    [Worker 1] Processed item #%ld: serial #%d received from pipe\n",
-               processed_count, packet.serial_number);
-        sleep(2); // 2s processing simulation per item
-    }
-
-    if (bytes_read == -1) {
-        perror("  [Worker 1] Error reading from pipe");
-        close(read_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("  [Worker 1] Reached EOF on pipe. Total items received: %ld. Closing station.\n", processed_count);
-    close(read_fd);
-    exit(EXIT_SUCCESS);
-}
-
-/* Worker 2 logic */
-static void run_worker2(void) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-    printf("  [Worker 2] Started. PID: %d, PPID: %d\n", getpid(), getppid());
-    printf("  [Worker 2] Initializing testing station...\n");
-    sleep(1);
-
-    printf("  [Worker 2] Sending SIGUSR2 readiness signal to Supervisor...\n");
-    if (kill(getppid(), SIGUSR2) == -1) {
-        perror("  [Worker 2] Failed to send SIGUSR2");
-        exit(EXIT_FAILURE);
-    }
-    exit(EXIT_SUCCESS);
 }
 
 static void print_usage(FILE *stream, const char *prog_name) {
@@ -125,10 +69,19 @@ int main(int argc, char *argv[]) {
 
     setup_supervisor_signals();
 
-    // 1. Create unnamed pipe before fork()
+    //Setup named pipe (FIFO) for communication between workers
+    unlink(FIFO_PATH); // Clean up stale FIFO if exists
+    if (mkfifo(FIFO_PATH, 0666) == -1) {
+        perror("[ERROR] Failed to create FIFO");
+        return EXIT_FAILURE;
+    }
+    printf("[Supervisor] Named pipe (FIFO) created at: %s\n", FIFO_PATH);
+
+    //Create unnamed pipe before fork()
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("[ERROR] Failed to create unnamed pipe");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
     printf("[Supervisor] Unnamed pipe created successfully (read_fd=%d, write_fd=%d).\n", pipe_fd[0], pipe_fd[1]);
@@ -147,6 +100,7 @@ int main(int argc, char *argv[]) {
     pid_t pid1 = fork();
     if (pid1 == -1) {
         perror("[ERROR] Failed to fork Worker 1");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
 
@@ -155,11 +109,12 @@ int main(int argc, char *argv[]) {
         close(pipe_fd[1]); 
         run_worker1(pipe_fd[0]);
     }
-    
+
     // Fork Worker 2
     pid_t pid2 = fork();
     if (pid2 == -1) {
         perror("[ERROR] Failed to fork Worker 2");
+        unlink(FIFO_PATH);
         return EXIT_FAILURE;
     }
     
@@ -174,7 +129,7 @@ int main(int argc, char *argv[]) {
     // Supervisor closes read end
     close(pipe_fd[0]);
 
-    // Await ready signals
+    // Await readiness handshake
     printf("[Supervisor] Awaiting readiness signals from both workers...\n");
     while (!worker1_ready || !worker2_ready) {
         sigsuspend(&orig_mask);
@@ -211,6 +166,8 @@ int main(int argc, char *argv[]) {
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
 
-    printf("[Supervisor] All workers shut down cleanly. Exiting.\n");
+    unlink(FIFO_PATH);
+    printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
+
     return EXIT_SUCCESS;
 }

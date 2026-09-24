@@ -1,14 +1,20 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2
+CFLAGS = -Wall -Wextra -O2 -Iinclude
+LDFLAGS = -lpthread
+
+SRCS = src/main.c src/worker1.c src/worker2.c
+OBJS = $(SRCS:.c=.o)
 TARGET = factory
-SRC = src/main.c
+
+.PHONY: all clean
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) src/common.h
-	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) -lpthread
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(TARGET)
-
-.PHONY: all clean
+	rm -f src/*.o $(TARGET) /tmp/factory_fifo

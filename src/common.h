@@ -56,4 +56,8 @@ typedef struct {
     int quality_score; // Final quality testing score (range: 1 - 10)
 } mq_packet_t;
 
+/* Worker process entry points */
+void run_worker1(int read_fd);
+void run_worker2(void);
+
 #endif // COMMON_H
