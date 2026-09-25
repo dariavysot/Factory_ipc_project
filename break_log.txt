@@ -1,0 +1,24 @@
+[[Worker 1] | PID 308847] START break at 2026-09-25 09:43:27 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 308847] END   break at 2026-09-25 09:43:31
+[[Worker 2] | PID 308848] START break at 2026-09-25 09:43:39 | Reason: Batch quota reached: 8 items
+[[Worker 2] | PID 308848] END   break at 2026-09-25 09:43:43
+[[Worker 1] | PID 308847] START break at 2026-09-25 09:43:55 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 308847] END   break at 2026-09-25 09:43:59
+[[Worker 2] | PID 308848] START break at 2026-09-25 09:44:07 | Reason: Batch quota reached: 6 items
+[[Worker 2] | PID 308848] END   break at 2026-09-25 09:44:11
+[[Worker 1] | PID 308847] START break at 2026-09-25 09:44:23 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 308847] END   break at 2026-09-25 09:44:27
+[[Worker 2] | PID 308848] START break at 2026-09-25 09:44:35 | Reason: Batch quota reached: 6 items
+[[Worker 2] | PID 308848] END   break at 2026-09-25 09:44:39
+[[Worker 1] | PID 309880] START break at 2026-09-25 09:45:04 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 309880] END   break at 2026-09-25 09:45:08
+[[Worker 2] | PID 309881] START break at 2026-09-25 09:45:16 | Reason: Batch quota reached: 8 items
+[[Worker 2] | PID 309881] END   break at 2026-09-25 09:45:20
+[[Worker 1] | PID 309880] START break at 2026-09-25 09:45:32 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 309880] END   break at 2026-09-25 09:45:36
+[[Worker 2] | PID 309881] START break at 2026-09-25 09:45:44 | Reason: Batch quota reached: 6 items
+[[Worker 2] | PID 309881] END   break at 2026-09-25 09:45:48
+[[Worker 1] | PID 309880] START break at 2026-09-25 09:46:00 | Reason: Batch quota reached: 6 items
+[[Worker 1] | PID 309880] END   break at 2026-09-25 09:46:04
+[[Worker 2] | PID 309881] START break at 2026-09-25 09:46:12 | Reason: Batch quota reached: 6 items
+[[Worker 2] | PID 309881] END   break at 2026-09-25 09:46:16

@@ -1,5 +1,16 @@
 #include "common.h"
 
+int check_break_quota(int *items_since_break, int *current_threshold, char *reason_buf, size_t buf_size) {
+    (*items_since_break)++;
+    if (*items_since_break >= *current_threshold) {
+        snprintf(reason_buf, buf_size, "Batch quota reached: %d items", *items_since_break);
+        *items_since_break = 0;
+        *current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
+        return 1;
+    }
+    return 0;
+}
+
 void take_break(const char *worker_name, const char *reason) {
     sem_t *sem = sem_open(SEM_NAME, 0);
     if (sem == SEM_FAILED) {

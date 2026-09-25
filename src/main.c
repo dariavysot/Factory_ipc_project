@@ -3,11 +3,9 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 
-
 /* Atomic readiness flags for both workers */
 static volatile sig_atomic_t worker1_ready = 0;
 static volatile sig_atomic_t worker2_ready = 0;
-
 
 /* Unified signal handler for both worker readiness signals */
 static void handle_worker_ready(int sig) {
@@ -18,7 +16,6 @@ static void handle_worker_ready(int sig) {
     }
 }
 
-
 /* Register readiness signals using a single sigaction configuration */
 static void setup_supervisor_signals(void) {
     struct sigaction sa;
@@ -27,13 +24,11 @@ static void setup_supervisor_signals(void) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
 
-
     if (sigaction(SIGUSR1, &sa, NULL) == -1 || sigaction(SIGUSR2, &sa, NULL) == -1) {
         perror("[ERROR] Failed to configure worker signal handlers");
         exit(EXIT_FAILURE);
     }
 }
-
 
 static void print_usage(FILE *stream, const char *prog_name) {
     fprintf(stream, "Usage: %s <total_items>\n", prog_name);
@@ -44,6 +39,86 @@ static void print_usage(FILE *stream, const char *prog_name) {
     fprintf(stream, "  -h, --help     Display this help message and exit\n");
 }
 
+// Initializes and purges all IPC primitives required by the factory system:
+static void init_ipc_resources(supervisor_ipc_t *ipc) {
+    // Setup named pipe (FIFO)
+    unlink(FIFO_PATH); // Remove stale FIFO if left over
+    if (mkfifo(FIFO_PATH, 0666) == -1) {
+        perror("[ERROR] Failed to create FIFO");
+        exit(EXIT_FAILURE);
+    }
+    printf("[Supervisor] Named pipe (FIFO) created at: %s\n", FIFO_PATH);
+
+    // Setup System V Message Queue
+    key_t msg_key = ftok(".", PROJECT_ID);
+    if (msg_key == -1) {
+        perror("[ERROR] Failed to generate message queue key via ftok");
+        unlink(FIFO_PATH);
+        exit(EXIT_FAILURE);
+    }
+
+    ipc->msqid = msgget(msg_key, IPC_CREAT | 0666);
+    if (ipc->msqid == -1) {
+        perror("[ERROR] Failed to create message queue");
+        unlink(FIFO_PATH);
+        exit(EXIT_FAILURE);
+    }
+
+    // Drain leftover messages from any previously killed runs
+    mq_packet_t stale_drain;
+    while (msgrcv(ipc->msqid, &stale_drain, sizeof(stale_drain) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+        /* Purge */
+    }
+    printf("[Supervisor] Message queue initialized and purged (msqid=%d, key=0x%x).\n", ipc->msqid, msg_key);
+
+    // Setup POSIX Named Semaphore
+    sem_unlink(SEM_NAME); // Clean up stale semaphore if exists
+    ipc->break_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 1);
+    if (ipc->break_sem == SEM_FAILED) {
+        perror("[ERROR] Failed to create break semaphore");
+        msgctl(ipc->msqid, IPC_RMID, NULL);
+        unlink(FIFO_PATH);
+        exit(EXIT_FAILURE);
+    }
+    printf("[Supervisor] Break synchronization semaphore initialized: %s (value=1).\n", SEM_NAME);
+
+    // Create Unnamed Pipe before fork()
+    if (pipe(ipc->pipe_fd) == -1) {
+        perror("[ERROR] Failed to create unnamed pipe");
+        sem_close(ipc->break_sem);
+        sem_unlink(SEM_NAME);
+        msgctl(ipc->msqid, IPC_RMID, NULL);
+        unlink(FIFO_PATH);
+        exit(EXIT_FAILURE);
+    }
+    printf("[Supervisor] Unnamed pipe created successfully (read_fd=%d, write_fd=%d).\n",
+           ipc->pipe_fd[0], ipc->pipe_fd[1]);
+}
+
+/**
+ * Deallocates and unlinks all active IPC resources during graceful shutdown or abort.
+ */
+static void cleanup_ipc_resources(supervisor_ipc_t *ipc) {
+    if (ipc->break_sem != SEM_FAILED && ipc->break_sem != NULL) {
+        sem_close(ipc->break_sem);
+    }
+    if (sem_unlink(SEM_NAME) == -1 && errno != ENOENT) {
+        perror("[ERROR] Failed to unlink semaphore");
+    } else {
+        printf("[Supervisor] Break semaphore unlinked successfully.\n");
+    }
+
+    if (ipc->msqid != -1) {
+        if (msgctl(ipc->msqid, IPC_RMID, NULL) == -1 && errno != EINVAL) {
+            perror("[ERROR] Failed to remove message queue");
+        } else {
+            printf("[Supervisor] Message queue deallocated successfully.\n");
+        }
+    }
+
+    unlink(FIFO_PATH);
+    printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
+}
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -80,63 +155,9 @@ int main(int argc, char *argv[]) {
 
     setup_supervisor_signals();
 
-
-    //Setup named pipe (FIFO) for communication between workers
-    unlink(FIFO_PATH); // Clean up stale FIFO if exists
-    if (mkfifo(FIFO_PATH, 0666) == -1) {
-        perror("[ERROR] Failed to create FIFO");
-        return EXIT_FAILURE;
-    }
-    printf("[Supervisor] Named pipe (FIFO) created at: %s\n", FIFO_PATH);
-
-
-    // Setup System V Message Queue
-    key_t msg_key = ftok(".", PROJECT_ID);
-    if (msg_key == -1) {
-        perror("[ERROR] Failed to generate message queue key via ftok");
-        unlink(FIFO_PATH);
-        return EXIT_FAILURE;
-    }
-
-
-int msqid = msgget(msg_key, IPC_CREAT | 0666);
-    if (msqid == -1) {
-        perror("[ERROR] Failed to create message queue");
-        unlink(FIFO_PATH);
-        return EXIT_FAILURE;
-    }
-
-    /* Drain any stale messages leftover from previously killed runs */
-    mq_packet_t stale_drain;
-    while (msgrcv(msqid, &stale_drain, sizeof(stale_drain) - sizeof(long), 0, IPC_NOWAIT) != -1) {
-        /* Purge leftover queue messages */
-    }
-    printf("[Supervisor] Message queue initialized and purged (msqid=%d, key=0x%x).\n", msqid, msg_key);
-
-    // Setup POSIX named semaphore for mutual exclusion during worker breaks
-    sem_unlink(SEM_NAME); // Clean up stale semaphore if leftover
-    sem_t *break_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 1);
-    if (break_sem == SEM_FAILED) {
-        perror("[ERROR] Failed to create break semaphore");
-        msgctl(msqid, IPC_RMID, NULL);
-        unlink(FIFO_PATH);
-        return EXIT_FAILURE;
-    }
-    printf("[Supervisor] Break synchronization semaphore initialized: %s (value=1).\n", SEM_NAME);
-
-
-    // Create unnamed pipe before fork()
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        perror("[ERROR] Failed to create unnamed pipe");
-        sem_close(break_sem);
-        sem_unlink(SEM_NAME);
-        msgctl(msqid, IPC_RMID, NULL);
-        unlink(FIFO_PATH);
-        return EXIT_FAILURE;
-    }
-    printf("[Supervisor] Unnamed pipe created successfully (read_fd=%d, write_fd=%d).\n", pipe_fd[0], pipe_fd[1]);
-
+    // Initialize all IPC channels (FIFO, Message Queue, Semaphore, Pipe)
+    supervisor_ipc_t ipc;
+    init_ipc_resources(&ipc);
 
     /* Block signals to prevent race conditions during worker bootstrap */
     sigset_t block_mask, orig_mask;
@@ -154,18 +175,14 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
     pid_t pid1 = fork();
     if (pid1 == -1) {
         perror("[ERROR] Failed to fork Worker 1");
-        sem_close(break_sem);
-        sem_unlink(SEM_NAME);
-        msgctl(msqid, IPC_RMID, NULL);
-        unlink(FIFO_PATH);
+        cleanup_ipc_resources(&ipc);
         return EXIT_FAILURE;
     }
 
-
     if (pid1 == 0) {
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
-        close(pipe_fd[1]);
-        run_worker1(pipe_fd[0]);
+        close(ipc.pipe_fd[1]);
+        run_worker1(ipc.pipe_fd[0]);
     }
 
 
@@ -173,27 +190,23 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
     pid_t pid2 = fork();
     if (pid2 == -1) {
         perror("[ERROR] Failed to fork Worker 2");
-        sem_close(break_sem);
-        sem_unlink(SEM_NAME);
-        msgctl(msqid, IPC_RMID, NULL);
-        unlink(FIFO_PATH);
+        cleanup_ipc_resources(&ipc);
         return EXIT_FAILURE;
     }
    
     if (pid2 == 0) {
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
         // Worker 2 does not use this pipe; close both ends
-        close(pipe_fd[0]);
-        close(pipe_fd[1]);
-        run_worker2(msqid);
+        close(ipc.pipe_fd[0]);
+        close(ipc.pipe_fd[1]);
+        run_worker2(ipc.msqid);
     }
 
 
-    // Supervisor closes read end
-    close(pipe_fd[0]);
+    // Supervisor closes read end of pipe
+    close(ipc.pipe_fd[0]);
 
-
-    // Await readiness handshake
+    // Await readiness handshake from both workers
     printf("[Supervisor] Awaiting readiness signals from both workers...\n");
     while (!worker1_ready || !worker2_ready) {
         sigsuspend(&orig_mask);
@@ -214,8 +227,7 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
         pipe_packet_t packet;
         packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
 
-
-        ssize_t bytes_written = write(pipe_fd[1], &packet, sizeof(packet));
+        ssize_t bytes_written = write(ipc.pipe_fd[1], &packet, sizeof(packet));
         if (bytes_written != sizeof(packet)) {
             perror("[ERROR] Failed to write item packet into pipe");
             break;
@@ -228,7 +240,7 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
 
 
     // Close pipe to signal EOF to Worker 1
-    close(pipe_fd[1]);
+    close(ipc.pipe_fd[1]);
     printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
 
 
@@ -244,8 +256,7 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
     long passed_count = 0;
     double total_score = 0.0;
 
-
-    while (msgrcv(msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+    while (msgrcv(ipc.msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
         passed_count++;
         total_score += result_msg.quality_score;
         printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
@@ -267,26 +278,8 @@ int msqid = msgget(msg_key, IPC_CREAT | 0666);
     }
     printf("=============================================================\n\n");
 
-
-    // Clean up all IPC resources
-    sem_close(break_sem);
-    if (sem_unlink(SEM_NAME) == -1) {
-        perror("[ERROR] Failed to unlink semaphore");
-    } else {
-        printf("[Supervisor] Break semaphore unlinked successfully.\n");
-    }
-
-
-    if (msgctl(msqid, IPC_RMID, NULL) == -1) {
-        perror("[ERROR] Failed to remove message queue");
-    } else {
-        printf("[Supervisor] Message queue deallocated successfully.\n");
-    }
-
-
-    unlink(FIFO_PATH);
-    printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
-
+    // Deallocate and clean up all IPC resources
+    cleanup_ipc_resources(&ipc);
 
     return EXIT_SUCCESS;
 }
