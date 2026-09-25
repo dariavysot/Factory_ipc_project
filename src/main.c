@@ -157,6 +157,36 @@ static void await_workers_readiness(sigset_t *orig_mask) {
     printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
 }
 
+/**
+ * Reads quality scores from the System V Message Queue and prints the summary report.
+ */
+static void collect_quality_report(int msqid, long total_items) {
+    printf("\n================ [SUPERVISOR QUALITY REPORT] ================\n");
+    mq_packet_t result_msg;
+    long passed_count = 0;
+    double total_score = 0.0;
+
+    while (msgrcv(msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+        passed_count++;
+        total_score += result_msg.quality_score;
+        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
+               passed_count, result_msg.serial_number, result_msg.quality_score);
+    }
+
+    if (errno != ENOMSG && errno != 0) {
+        perror("[ERROR] Error reading from message queue");
+    }
+
+    printf("-------------------------------------------------------------\n");
+    printf("  Total items dispatched: %ld\n", total_items);
+    printf("  Items passed to final test: %ld\n", passed_count);
+    printf("  Items rejected as defect: %ld\n", total_items - passed_count);
+    if (passed_count > 0) {
+        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
+    }
+    printf("=============================================================\n\n");
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "[ERROR] Missing required argument.\n\n");
@@ -255,35 +285,8 @@ int main(int argc, char *argv[]) {
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
 
-
-    // Read and print final quality test results from Message Queue
-    printf("\n================ [SUPERVISOR QUALITY REPORT] ================\n");
-    mq_packet_t result_msg;
-    long passed_count = 0;
-    double total_score = 0.0;
-
-    while (msgrcv(ipc.msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
-        passed_count++;
-        total_score += result_msg.quality_score;
-        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
-               passed_count, result_msg.serial_number, result_msg.quality_score);
-    }
-
-
-    if (errno != ENOMSG && errno != 0) {
-        perror("[ERROR] Error reading from message queue");
-    }
-
-
-    printf("-------------------------------------------------------------\n");
-    printf("  Total items dispatched: %ld\n", total_items);
-    printf("  Items passed to final test: %ld\n", passed_count);
-    printf("  Items rejected as defect: %ld\n", total_items - passed_count);
-    if (passed_count > 0) {
-        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
-    }
-    printf("=============================================================\n\n");
-
+    // Read quality report from Message Queue and print summary
+    collect_quality_report(ipc.msqid, total_items);
     // Deallocate and clean up all IPC resources
     cleanup_ipc_resources(&ipc);
 
