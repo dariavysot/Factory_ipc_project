@@ -42,7 +42,7 @@ void run_worker2(int msqid) {
         }
 
         total_received++;
-        items_since_break++;
+        //items_since_break++;
 
         if (strcmp(packet.status, STATUS_STANDARD) == 0) {
             standard_count++;
