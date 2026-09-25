@@ -1,3 +1,8 @@
+/**
+ * @file worker1.c
+ * @brief Primary visual inspection station implementation.
+ */
+
 #include "common.h"
 #include <signal.h>
 
@@ -45,7 +50,6 @@ void run_worker1(int read_fd) {
         }
 
         processed_count++;
-        //items_since_break++;
 
         int roll = rand() % 100;
         int is_defect = (roll < DEFECT_PROBABILITY_PERCENT);
