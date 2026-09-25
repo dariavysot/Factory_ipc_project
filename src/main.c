@@ -129,7 +129,7 @@ static void dispatch_items(int write_fd, long total_items) {
 
     for (long i = 0; i < total_items; i++) {
         pipe_packet_t packet;
-        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
+        packet.serial_number = SERIAL_MIN + (rand() % SERIAL_RANGE); // 5-digit serial number
 
         ssize_t bytes_written = write(write_fd, &packet, sizeof(packet));
         if (bytes_written != sizeof(packet)) {
@@ -169,8 +169,8 @@ static void collect_quality_report(int msqid, long total_items) {
     while (msgrcv(msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
         passed_count++;
         total_score += result_msg.quality_score;
-        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
-               passed_count, result_msg.serial_number, result_msg.quality_score);
+        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/%d\n",
+               passed_count, result_msg.serial_number, result_msg.quality_score, QUALITY_MAX);
     }
 
     if (errno != ENOMSG && errno != 0) {
@@ -182,7 +182,7 @@ static void collect_quality_report(int msqid, long total_items) {
     printf("  Items passed to final test: %ld\n", passed_count);
     printf("  Items rejected as defect: %ld\n", total_items - passed_count);
     if (passed_count > 0) {
-        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
+        printf("  Average quality score: %.2f / %d\n", total_score / (double)passed_count, QUALITY_MAX);
     }
     printf("=============================================================\n\n");
 }

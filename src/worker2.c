@@ -48,7 +48,7 @@ void run_worker2(int msqid) {
             standard_count++;
 
             // Quality evaluation: score from 1 to 10
-            int quality_score = (rand() % 10) + 1;
+            int quality_score = (rand() % (QUALITY_MAX - QUALITY_MIN + 1)) + QUALITY_MIN;
 
             printf("      [Worker 2] Testing item #%ld (serial #%d): Status [%s] -> Final Quality Score: [%d/10]\n",
                    total_received, packet.serial_number, packet.status, quality_score);

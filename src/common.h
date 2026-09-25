@@ -22,6 +22,11 @@
 #define LOG_FILE  "break_log.txt"
 #define PROJECT_ID 'F' // Project identifier for ftok() message queue key
 
+/* Production Item Constants */
+#define SERIAL_MIN          10000
+#define SERIAL_RANGE        90000       /* Yields 10000..99999 */
+#define QUALITY_MIN         1
+#define QUALITY_MAX         10
 /* Defect probability rate for Worker 1 (15%) */
 #define DEFECT_PROBABILITY_PERCENT 15
 
@@ -32,6 +37,7 @@
 /* Break trigger thresholds for workload volume */
 #define BREAK_BATCH_MIN 5
 #define BREAK_BATCH_MAX 7
+#define BREAK_DURATION_SEC  4
 
 /* 
  * 1. Data structure for the unnamed pipe
