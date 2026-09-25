@@ -86,18 +86,35 @@ Pass the number of items to produce as a command-line argument:
 
 
 ### Run with 10 items
-```text
+```bash
 ./factory 10
 ```
 
 ### Display usage
-```text
+```bash
 ./factory --help
 ```
 ## Integration Testing
-A test script is included to verify semaphore mutual exclusion, chronology, and break count sanity:
 
-```text
-chmod +x tests/test_semaphore.sh
+The project includes an automated suite of 4 integration tests covering each IPC mechanism and synchronization constraint:
+
+| Test Script | Target Subsystem | Verification Criteria |
+| :--- | :--- | :--- |
+| `tests/test_pipe.sh` | Unnamed Pipe | Confirms zero data loss for all dispatched packets between Supervisor and Worker 1. |
+| `tests/test_fifo.sh` | Named Pipe (FIFO) | Validates inter-worker streaming, packet integrity, and correct routing of `STANDARD` vs. `DEFECT` items. |
+| `tests/test_mq.sh` | System V Message Queue | Ensures 1:1 parity between quality reports dispatched by Worker 2 and collected by Supervisor, plus clean queue deallocation. |
+| `tests/test_semaphore.sh` | POSIX Named Semaphore | Proves mutual exclusion (strict `START`/`END` parity, non-overlapping critical sections) and sanity of quota-driven break intervals. |
+
+### Running the Tests
+
+Grant execution permissions and run individual test scripts:
+
+```bash
+chmod +x tests/*.sh
+
+# Run all tests sequentially
+./tests/test_pipe.sh
+./tests/test_fifo.sh
+./tests/test_mq.sh
 ./tests/test_semaphore.sh
 ```
