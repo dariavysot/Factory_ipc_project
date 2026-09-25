@@ -45,7 +45,7 @@ void run_worker1(int read_fd) {
         }
 
         processed_count++;
-        items_since_break++;
+        //items_since_break++;
 
         int roll = rand() % 100;
         int is_defect = (roll < DEFECT_PROBABILITY_PERCENT);
