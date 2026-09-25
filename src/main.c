@@ -121,6 +121,32 @@ static void cleanup_ipc_resources(supervisor_ipc_t *ipc) {
 }
 
 /**
+ * Generates serial numbers and writes them into the pipe connected to Worker 1.
+ */
+static void dispatch_items(int write_fd, long total_items) {
+    srand((unsigned int)time(NULL));
+    printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
+
+    for (long i = 0; i < total_items; i++) {
+        pipe_packet_t packet;
+        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
+
+        ssize_t bytes_written = write(write_fd, &packet, sizeof(packet));
+        if (bytes_written != sizeof(packet)) {
+            perror("[ERROR] Failed to write item packet into pipe");
+            break;
+        }
+
+        printf("  [Supervisor] Dispatched item [%ld/%ld]: serial #%d\n",
+               i + 1, total_items, packet.serial_number);
+    }
+
+    // Close pipe to signal EOF to Worker 1
+    close(write_fd);
+    printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
+}
+
+/**
  * Suspends execution until both workers signal readiness (SIGUSR1, SIGUSR2).
  */
 static void await_workers_readiness(sigset_t *orig_mask) {
@@ -129,6 +155,36 @@ static void await_workers_readiness(sigset_t *orig_mask) {
         sigsuspend(orig_mask);
     }
     printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
+}
+
+/**
+ * Reads quality scores from the System V Message Queue and prints the summary report.
+ */
+static void collect_quality_report(int msqid, long total_items) {
+    printf("\n================ [SUPERVISOR QUALITY REPORT] ================\n");
+    mq_packet_t result_msg;
+    long passed_count = 0;
+    double total_score = 0.0;
+
+    while (msgrcv(msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
+        passed_count++;
+        total_score += result_msg.quality_score;
+        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
+               passed_count, result_msg.serial_number, result_msg.quality_score);
+    }
+
+    if (errno != ENOMSG && errno != 0) {
+        perror("[ERROR] Error reading from message queue");
+    }
+
+    printf("-------------------------------------------------------------\n");
+    printf("  Total items dispatched: %ld\n", total_items);
+    printf("  Items passed to final test: %ld\n", passed_count);
+    printf("  Items rejected as defect: %ld\n", total_items - passed_count);
+    if (passed_count > 0) {
+        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
+    }
+    printf("=============================================================\n\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -221,67 +277,16 @@ int main(int argc, char *argv[]) {
     await_workers_readiness(&orig_mask);
     sigprocmask(SIG_SETMASK, &orig_mask, NULL);
 
-    // Seed random generator for serial numbers
-    srand((unsigned int)time(NULL));
-
-
-    // Stream serial numbers into unnamed pipe
-    printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
-    for (long i = 0; i < total_items; i++) {
-        pipe_packet_t packet;
-        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
-
-        ssize_t bytes_written = write(ipc.pipe_fd[1], &packet, sizeof(packet));
-        if (bytes_written != sizeof(packet)) {
-            perror("[ERROR] Failed to write item packet into pipe");
-            break;
-        }
-
-
-        printf("  [Supervisor] Dispatched item [%ld/%ld]: serial #%d\n",
-               i + 1, total_items, packet.serial_number);
-    }
-
-
-    // Close pipe to signal EOF to Worker 1
-    close(ipc.pipe_fd[1]);
-    printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
-
+    // Stream production items to Worker 1
+    dispatch_items(ipc.pipe_fd[1], total_items);
 
     // Wait for worker termination
     int status;
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
 
-
-    // Read and print final quality test results from Message Queue
-    printf("\n================ [SUPERVISOR QUALITY REPORT] ================\n");
-    mq_packet_t result_msg;
-    long passed_count = 0;
-    double total_score = 0.0;
-
-    while (msgrcv(ipc.msqid, &result_msg, sizeof(result_msg) - sizeof(long), 0, IPC_NOWAIT) != -1) {
-        passed_count++;
-        total_score += result_msg.quality_score;
-        printf("  -> Verified item #%ld | Serial: %d | Quality Score: %d/10\n",
-               passed_count, result_msg.serial_number, result_msg.quality_score);
-    }
-
-
-    if (errno != ENOMSG && errno != 0) {
-        perror("[ERROR] Error reading from message queue");
-    }
-
-
-    printf("-------------------------------------------------------------\n");
-    printf("  Total items dispatched: %ld\n", total_items);
-    printf("  Items passed to final test: %ld\n", passed_count);
-    printf("  Items rejected as defect: %ld\n", total_items - passed_count);
-    if (passed_count > 0) {
-        printf("  Average quality score: %.2f / 10\n", total_score / (double)passed_count);
-    }
-    printf("=============================================================\n\n");
-
+    // Read quality report from Message Queue and print summary
+    collect_quality_report(ipc.msqid, total_items);
     // Deallocate and clean up all IPC resources
     cleanup_ipc_resources(&ipc);
 
