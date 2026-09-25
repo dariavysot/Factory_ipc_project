@@ -39,7 +39,7 @@ static void print_usage(FILE *stream, const char *prog_name) {
     fprintf(stream, "  -h, --help     Display this help message and exit\n");
 }
 
-// Initializes and purges all IPC primitives required by the factory system:
+/* Initializes and purges all IPC primitives required by the factory system */
 static void init_ipc_resources(supervisor_ipc_t *ipc) {
     // Setup named pipe (FIFO)
     unlink(FIFO_PATH); // Remove stale FIFO if left over
@@ -118,6 +118,17 @@ static void cleanup_ipc_resources(supervisor_ipc_t *ipc) {
 
     unlink(FIFO_PATH);
     printf("[Supervisor] Named pipe (FIFO) unlinked. Clean exit.\n");
+}
+
+/**
+ * Suspends execution until both workers signal readiness (SIGUSR1, SIGUSR2).
+ */
+static void await_workers_readiness(sigset_t *orig_mask) {
+    printf("[Supervisor] Awaiting readiness signals from both workers...\n");
+    while (!worker1_ready || !worker2_ready) {
+        sigsuspend(orig_mask);
+    }
+    printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -207,15 +218,8 @@ int main(int argc, char *argv[]) {
     close(ipc.pipe_fd[0]);
 
     // Await readiness handshake from both workers
-    printf("[Supervisor] Awaiting readiness signals from both workers...\n");
-    while (!worker1_ready || !worker2_ready) {
-        sigsuspend(&orig_mask);
-    }
+    await_workers_readiness(&orig_mask);
     sigprocmask(SIG_SETMASK, &orig_mask, NULL);
-
-
-    printf("[Supervisor] Both workers reported ready! Starting production line.\n\n");
-
 
     // Seed random generator for serial numbers
     srand((unsigned int)time(NULL));
