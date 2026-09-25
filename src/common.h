@@ -60,6 +60,14 @@ typedef struct {
     int quality_score; // Final quality testing score (range: 1 - 10)
 } mq_packet_t;
 
+/* Container for all Supervisor IPC communication primitives */
+typedef struct {
+    int msqid;
+    sem_t *break_sem;
+    int pipe_fd[2];
+} supervisor_ipc_t;
+
+
 /* Worker process entry points */
 void run_worker1(int read_fd);
 void run_worker2(int mtype);
