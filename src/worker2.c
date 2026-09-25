@@ -1,3 +1,8 @@
+/**
+ * @file worker2.c
+ * @brief Secondary technical testing station implementation.
+ */
+
 #include "common.h"
 #include <signal.h>
 
@@ -42,7 +47,6 @@ void run_worker2(int msqid) {
         }
 
         total_received++;
-        //items_since_break++;
 
         if (strcmp(packet.status, STATUS_STANDARD) == 0) {
             standard_count++;
@@ -50,8 +54,8 @@ void run_worker2(int msqid) {
             // Quality evaluation: score from 1 to 10
             int quality_score = (rand() % (QUALITY_MAX - QUALITY_MIN + 1)) + QUALITY_MIN;
 
-            printf("      [Worker 2] Testing item #%ld (serial #%d): Status [%s] -> Final Quality Score: [%d/10]\n",
-                   total_received, packet.serial_number, packet.status, quality_score);
+            printf("      [Worker 2] Testing item #%ld (serial #%d): Status [%s] -> Final Quality Score: [%d/%d]\n",
+                   total_received, packet.serial_number, packet.status, quality_score, QUALITY_MAX);
 
             // Prepare System V Message Queue packet
             mq_packet_t msg;
