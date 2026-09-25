@@ -73,13 +73,9 @@ void run_worker2(int msqid) {
         }
 
         // Check workload fatigue threshold
-        if (items_since_break >= current_threshold) {
-            char reason_buf[64];
-            snprintf(reason_buf, sizeof(reason_buf), "Batch quota reached: %d items", items_since_break);
+        char reason_buf[64];
+        if (check_break_quota(&items_since_break, &current_threshold, reason_buf, sizeof(reason_buf))) {
             take_break("[Worker 2]", reason_buf);
-
-            items_since_break = 0;
-            current_threshold = BREAK_BATCH_MIN + (rand() % (BREAK_BATCH_MAX - BREAK_BATCH_MIN + 1));
         }
 
         sleep(5);
