@@ -121,6 +121,32 @@ static void cleanup_ipc_resources(supervisor_ipc_t *ipc) {
 }
 
 /**
+ * Generates serial numbers and writes them into the pipe connected to Worker 1.
+ */
+static void dispatch_items(int write_fd, long total_items) {
+    srand((unsigned int)time(NULL));
+    printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
+
+    for (long i = 0; i < total_items; i++) {
+        pipe_packet_t packet;
+        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
+
+        ssize_t bytes_written = write(write_fd, &packet, sizeof(packet));
+        if (bytes_written != sizeof(packet)) {
+            perror("[ERROR] Failed to write item packet into pipe");
+            break;
+        }
+
+        printf("  [Supervisor] Dispatched item [%ld/%ld]: serial #%d\n",
+               i + 1, total_items, packet.serial_number);
+    }
+
+    // Close pipe to signal EOF to Worker 1
+    close(write_fd);
+    printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
+}
+
+/**
  * Suspends execution until both workers signal readiness (SIGUSR1, SIGUSR2).
  */
 static void await_workers_readiness(sigset_t *orig_mask) {
@@ -221,32 +247,8 @@ int main(int argc, char *argv[]) {
     await_workers_readiness(&orig_mask);
     sigprocmask(SIG_SETMASK, &orig_mask, NULL);
 
-    // Seed random generator for serial numbers
-    srand((unsigned int)time(NULL));
-
-
-    // Stream serial numbers into unnamed pipe
-    printf("[Supervisor] Generating and dispatching %ld items...\n", total_items);
-    for (long i = 0; i < total_items; i++) {
-        pipe_packet_t packet;
-        packet.serial_number = 10000 + (rand() % 90000); // 5-digit serial number
-
-        ssize_t bytes_written = write(ipc.pipe_fd[1], &packet, sizeof(packet));
-        if (bytes_written != sizeof(packet)) {
-            perror("[ERROR] Failed to write item packet into pipe");
-            break;
-        }
-
-
-        printf("  [Supervisor] Dispatched item [%ld/%ld]: serial #%d\n",
-               i + 1, total_items, packet.serial_number);
-    }
-
-
-    // Close pipe to signal EOF to Worker 1
-    close(ipc.pipe_fd[1]);
-    printf("[Supervisor] All items dispatched. Pipe write end closed.\n\n");
-
+    // Stream production items to Worker 1
+    dispatch_items(ipc.pipe_fd[1], total_items);
 
     // Wait for worker termination
     int status;
