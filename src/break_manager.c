@@ -46,7 +46,7 @@ void take_break(const char *worker_name, const char *reason) {
     }
 
     // Simulate break duration (1 second)
-    sleep(4);
+    sleep(BREAK_DURATION_SEC);
 
     time(&rawtime);
     timeinfo = localtime(&rawtime);
