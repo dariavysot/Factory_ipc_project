@@ -4,19 +4,18 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-echo "[TEST] Building project..."
-make clean > /dev/null
-make > /dev/null
+echo "[TEST] Running POSIX Semaphore & break integrity test with 20 items..."
+make -s clean
+make -s
 
 LOG_FILE="break_log.txt"
-rm -f "$LOG_FILE"
-
 TOTAL_ITEMS=20
-echo "[TEST] Running factory with $TOTAL_ITEMS items to verify break logic..."
+
 ./factory "$TOTAL_ITEMS" > /dev/null
 
 if [ ! -f "$LOG_FILE" ]; then
     echo "[FAIL] Log file $LOG_FILE was not created!"
+    make -s clean
     exit 1
 fi
 
@@ -29,11 +28,13 @@ echo "  -> Total break END   entries: $END_COUNT"
 # 1. Check mutual exclusion balance
 if [ "$START_COUNT" -eq 0 ]; then
     echo "[FAIL] No breaks were recorded for $TOTAL_ITEMS items!"
+    make -s clean
     exit 1
 fi
 
 if [ "$START_COUNT" -ne "$END_COUNT" ]; then
     echo "[FAIL] Mismatch between START ($START_COUNT) and END ($END_COUNT) breaks!"
+    make -s clean
     exit 1
 fi
 
@@ -42,6 +43,7 @@ fi
 MAX_EXPECTED_BREAKS=8
 if [ "$START_COUNT" -gt "$MAX_EXPECTED_BREAKS" ]; then
     echo "[FAIL] Workers took too many breaks ($START_COUNT > $MAX_EXPECTED_BREAKS) for $TOTAL_ITEMS items! Double counting detected."
+    make -s clean
     exit 1
 fi
 
@@ -63,6 +65,7 @@ while IFS= read -r line; do
 done < "$LOG_FILE"
 
 if [ "$OVERLAP_DETECTED" -eq 1 ]; then
+    make -s clean
     exit 1
 fi
 
@@ -70,4 +73,8 @@ echo "[SUCCESS] Break & Semaphore tests passed:"
 echo "  - START and END balanced"
 echo "  - Break frequency is sane (no double-counting: $START_COUNT <= $MAX_EXPECTED_BREAKS)"
 echo "  - No overlapping critical sections (mutual exclusion strictly held)"
+
+# Clean up build artifacts and test logs
+make -s clean
+
 exit 0
