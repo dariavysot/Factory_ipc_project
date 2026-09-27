@@ -19,8 +19,10 @@ echo "  -> Queue cleaned:                  $QUEUE_CLEANED"
 
 if [ "$DISPATCHED" -eq 25 ] && [ "$MQ_SENT" -eq "$MQ_VERIFIED" ] && [ "$MQ_SENT" -gt 0 ] && [ "$QUEUE_CLEANED" -eq 1 ]; then
     echo "[SUCCESS] Message queue test passed: All standard items verified and resources cleaned up."
+    make -s clean
     exit 0
 else
     echo "[FAILURE] Message queue test failed: Count mismatch or queue cleanup failure."
+    make -s clean
     exit 1
 fi

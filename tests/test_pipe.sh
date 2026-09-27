@@ -19,8 +19,10 @@ echo "  -> Items processed by Worker 1:    $INSPECTED_COUNT"
 
 if [ "$DISPATCHED_COUNT" -eq 10 ] && [ "$INSPECTED_COUNT" -eq 10 ]; then
     echo "[SUCCESS] Pipe test passed: All items transferred without loss."
+    make -s clean
     exit 0
 else
     echo "[FAILURE] Pipe test failed: Mismatch in dispatched vs inspected items."
+    make -s clean
     exit 1
 fi

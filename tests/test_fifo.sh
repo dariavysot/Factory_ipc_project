@@ -27,8 +27,10 @@ echo "  -> Defect mentions:         $DEFECT_COUNT"
 
 if [ "$DISPATCHED_COUNT" -eq 20 ] && [ "$INSPECTED_COUNT" -eq 20 ] && [ "$W2_TOTAL" -eq 20 ]; then
     echo "[SUCCESS] FIFO test passed: All items transferred through unnamed and named pipes correctly."
+    make -s clean
     exit 0
 else
     echo "[FAILURE] FIFO test failed: Item count mismatch across the pipeline."
+    make -s clean
     exit 1
 fi
