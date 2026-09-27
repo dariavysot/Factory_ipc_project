@@ -7,6 +7,11 @@
 static volatile sig_atomic_t worker1_ready = 0;
 static volatile sig_atomic_t worker2_ready = 0;
 
+/* Global handles for emergency signal cleanup (Supervisor only) */
+static supervisor_ipc_t *g_active_ipc = NULL;
+static pid_t g_worker1_pid = -1;
+static pid_t g_worker2_pid = -1;
+
 /* Unified signal handler for both worker readiness signals */
 static void handle_worker_ready(int sig) {
     if (sig == SIGUSR1) {
@@ -16,7 +21,41 @@ static void handle_worker_ready(int sig) {
     }
 }
 
-/* Register readiness signals using a single sigaction configuration */
+static void cleanup_ipc_resources(supervisor_ipc_t *ipc);
+
+/* Dedicated signal handler for graceful shutdown (Supervisor only) */
+static void handle_shutdown(int sig) {
+    (void)sig;
+
+    // Flush newline so "^C" does not mangle log output
+    printf("\n\n[Supervisor] Emergency shutdown triggered (Ctrl+C). Cleaning up resources...\n");
+
+    // Terminate children if they are still active
+    if (g_worker1_pid > 0) {
+        kill(g_worker1_pid, SIGTERM);
+        waitpid(g_worker1_pid, NULL, WNOHANG);
+    }
+    if (g_worker2_pid > 0) {
+        kill(g_worker2_pid, SIGTERM);
+        waitpid(g_worker2_pid, NULL, WNOHANG);
+    }
+
+    // Clean up all IPC primitives from system memory
+    if (g_active_ipc != NULL) {
+        cleanup_ipc_resources(g_active_ipc);
+        g_active_ipc = NULL;
+    }
+
+    exit(EXIT_FAILURE);
+}
+
+/* Signal handler for workers: exit cleanly without touching shared IPC */
+static void handle_worker_shutdown(int sig) {
+    (void)sig;
+    _exit(EXIT_FAILURE);
+}
+
+/* Register readiness signals using sigaction */
 static void setup_supervisor_signals(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -26,6 +65,18 @@ static void setup_supervisor_signals(void) {
 
     if (sigaction(SIGUSR1, &sa, NULL) == -1 || sigaction(SIGUSR2, &sa, NULL) == -1) {
         perror("[ERROR] Failed to configure worker signal handlers");
+        exit(EXIT_FAILURE);
+    }
+
+    // Configure graceful shutdown for SIGINT and SIGTERM
+    struct sigaction sa_term;
+    memset(&sa_term, 0, sizeof(sa_term));
+    sa_term.sa_handler = handle_shutdown;
+    sigemptyset(&sa_term.sa_mask);
+    sa_term.sa_flags = 0;
+
+    if (sigaction(SIGINT, &sa_term, NULL) == -1 || sigaction(SIGTERM, &sa_term, NULL) == -1) {
+        perror("[ERROR] Failed to configure shutdown signal handler");
         exit(EXIT_FAILURE);
     }
 }
@@ -99,6 +150,8 @@ static void init_ipc_resources(supervisor_ipc_t *ipc) {
  * Deallocates and unlinks all active IPC resources during graceful shutdown or abort.
  */
 static void cleanup_ipc_resources(supervisor_ipc_t *ipc) {
+    if (ipc == NULL) return;
+
     if (ipc->break_sem != SEM_FAILED && ipc->break_sem != NULL) {
         sem_close(ipc->break_sem);
     }
@@ -219,12 +272,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-
+    // Configure signal handling
     setup_supervisor_signals();
 
     // Initialize all IPC channels (FIFO, Message Queue, Semaphore, Pipe)
     supervisor_ipc_t ipc;
     init_ipc_resources(&ipc);
+    g_active_ipc = &ipc; // Register handle for emergency signal cleanup
 
     /* Block signals to prevent race conditions during worker bootstrap */
     sigset_t block_mask, orig_mask;
@@ -247,11 +301,19 @@ int main(int argc, char *argv[]) {
     }
 
     if (pid1 == 0) {
+        // Child process must NOT touch IPC cleanup on Ctrl+C
+        struct sigaction sa_worker;
+        memset(&sa_worker, 0, sizeof(sa_worker));
+        sa_worker.sa_handler = handle_worker_shutdown;
+        sigaction(SIGINT, &sa_worker, NULL);
+        sigaction(SIGTERM, &sa_worker, NULL);
+        g_active_ipc = NULL;
+
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
         close(ipc.pipe_fd[1]);
         run_worker1(ipc.pipe_fd[0]);
     }
-
+    g_worker1_pid = pid1;
 
     // Fork Worker 2
     pid_t pid2 = fork();
@@ -262,13 +324,21 @@ int main(int argc, char *argv[]) {
     }
    
     if (pid2 == 0) {
+        // Child process must NOT touch IPC cleanup on Ctrl+C
+        struct sigaction sa_worker;
+        memset(&sa_worker, 0, sizeof(sa_worker));
+        sa_worker.sa_handler = handle_worker_shutdown;
+        sigaction(SIGINT, &sa_worker, NULL);
+        sigaction(SIGTERM, &sa_worker, NULL);
+        g_active_ipc = NULL;
+
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
         // Worker 2 does not use this pipe; close both ends
         close(ipc.pipe_fd[0]);
         close(ipc.pipe_fd[1]);
         run_worker2(ipc.msqid);
     }
-
+    g_worker2_pid = pid2;
 
     // Supervisor closes read end of pipe
     close(ipc.pipe_fd[0]);
@@ -284,11 +354,15 @@ int main(int argc, char *argv[]) {
     int status;
     waitpid(pid1, &status, 0);
     waitpid(pid2, &status, 0);
+    g_worker1_pid = -1;
+    g_worker2_pid = -1;
 
     // Read quality report from Message Queue and print summary
     collect_quality_report(ipc.msqid, total_items);
+
     // Deallocate and clean up all IPC resources
     cleanup_ipc_resources(&ipc);
+    g_active_ipc = NULL;
 
     return EXIT_SUCCESS;
 }
