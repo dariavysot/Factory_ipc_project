@@ -51,7 +51,7 @@ int check_break_quota(int *items_since_break, int *current_threshold, char *reas
  */
 void take_break(const char *worker_name, const char *reason) {
     pid_t pid = getpid();
-    printf("  %s requesting break [%s]... (waiting for semaphore)\n", worker_name, reason);
+    printf("  [%s] requesting break [%s]... (waiting for semaphore)\n", worker_name, reason);
 
     // Open existing named semaphore
     sem_t *sem = sem_open(SEM_NAME, 0);
@@ -72,7 +72,7 @@ void take_break(const char *worker_name, const char *reason) {
     char start_str[32];
     strftime(start_str, sizeof(start_str), "%Y-%m-%d %H:%M:%S", st_info);
 
-    printf("  %s entered break room at %s (reason: %s, semaphore locked)\n",
+    printf("  [%s] entered break room at %s (reason: %s, semaphore locked)\n",
            worker_name, start_str, reason);
     log_break_event(worker_name, pid, "START", reason);
 
@@ -84,7 +84,7 @@ void take_break(const char *worker_name, const char *reason) {
     char end_str[32];
     strftime(end_str, sizeof(end_str), "%Y-%m-%d %H:%M:%S", et_info);
 
-    printf("  %s ended break at %s (semaphore released)\n", worker_name, end_str);
+    printf("  [%s] ended break at %s (semaphore released)\n", worker_name, end_str);
     log_break_event(worker_name, pid, "END", NULL);
 
     // Leave critical section

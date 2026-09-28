@@ -79,10 +79,10 @@ void run_worker1(int read_fd) {
         // Check workload fatigue threshold
         char reason_buf[64];
         if (check_break_quota(&items_since_break, &current_threshold, reason_buf, sizeof(reason_buf))) {
-            take_break("[Worker 1]", reason_buf);
+            take_break("Worker 1", reason_buf);
         }
 
-        sleep(8);
+        //sleep(8);
     }
 
     if (bytes_read == -1) {

@@ -21,7 +21,7 @@ void run_worker2(int msqid) {
     }
     printf("  [Worker 2] FIFO channel opened for reading (fd=%d).\n", fifo_read_fd);
 
-    sleep(1);
+    //sleep(1);
 
     printf("  [Worker 2] Sending SIGUSR2 readiness signal to Supervisor...\n");
     if (kill(getppid(), SIGUSR2) == -1) {
@@ -79,10 +79,10 @@ void run_worker2(int msqid) {
         // Check workload fatigue threshold
         char reason_buf[64];
         if (check_break_quota(&items_since_break, &current_threshold, reason_buf, sizeof(reason_buf))) {
-            take_break("[Worker 2]", reason_buf);
+            take_break("Worker 2", reason_buf);
         }
 
-        sleep(5);
+        //sleep(5);
     }
 
     if (bytes_read == -1) {
